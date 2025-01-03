@@ -102,3 +102,93 @@ func (trade *Trade) Reward(current_step string, ohlcvs candle.Ohlcv, wallet floa
   // fmt.Println(resp)
   return resp
 }
+
+func hasLower(open float64, amountWithProfit float64, amountSell float64, idx int, ch chan float64, wg *sync.WaitGroup) {
+  defer wg.Done()
+
+  var result float64
+  result = -1.0
+  maxSteps := 31
+  stepsToBuy := idx + 1
+
+  if(stepsToBuy >= maxSteps) {
+    ch <- result
+    return
+  }
+
+  buyAmount := amountSell / open
+  if(buyAmount >= amountWithProfit) {
+    punishment := float64(stepsToBuy) * 0.023
+    result = 1.0 - punishment
+  }
+
+  ch <- result
+}
+
+func (trade *Trade) RewardSell(current_step string, ohlcvs candle.Ohlcv, wallet float64, roi float64) float64 {
+  var wg sync.WaitGroup
+  step, _ := strconv.Atoi(current_step)
+
+  lenOhlcvs := len(ohlcvs)
+  var endOhlcvs int
+  if((step+30) >= lenOhlcvs) {
+    endOhlcvs = lenOhlcvs
+  } else {
+    endOhlcvs = step + 30
+  }
+  limited_ohlcvs := ohlcvs[(step+1):(endOhlcvs)]
+
+  // var wallet float64
+  // wallet = 4000.00
+
+  // 0.003 => 0.3% # only fees
+  // 0.013 => 1.3%
+  // 0.033 => 3.3%
+  // 0.103 => 10.3%
+  // 0.303 => 30.3%
+
+  // adicionar crptoAmount no settings?
+  // a queda de venda é um pouco menor na porcentagem
+  // tem uma config para buy e sell de roi
+  cryptoAmount := 20.0
+  currentPrice := ohlcvs[step].Open
+  amountSell := cryptoAmount * currentPrice
+  // amountWithProfit := (cryptoAmount * roi) + cryptoAmount
+  amountWithProfit := (cryptoAmount * 0.103) + cryptoAmount
+
+  // fmt.Println(amountSell)
+  // fmt.Println(amountWithProfit)
+  // fmt.Println("---------------------------")
+  ch := make(chan float64, len(limited_ohlcvs))
+  for idx, ohlcv := range limited_ohlcvs {
+    wg.Add(1)
+    go hasLower(ohlcv.Open, amountWithProfit, amountSell, idx, ch, &wg)
+  }
+
+  go func() {
+    wg.Wait()
+    close(ch)
+  }()
+
+  resp := -1.0
+  var responses []float64
+
+  for result := range ch {
+    if(result > 0) {
+      responses = append(responses, result)
+    }
+  }
+
+  if(len(responses) > 0) {
+    sort.Float64s(responses)
+    // minimum := responses[0]
+    // maximum := responses[len(responses)-1]
+    // fmt.Println(minimum)
+    // fmt.Println(maximum)
+    // fmt.Println(responses)
+    resp = responses[len(responses) - 1]
+  }
+
+  // fmt.Println(resp)
+  return resp
+}
